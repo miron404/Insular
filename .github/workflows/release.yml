@@ -111,6 +111,15 @@ jobs:
       - name: Decode signing keystore
         run: echo "${{ secrets.RELEASE_KEYSTORE_B64 }}" | base64 -d > android-signing-keystore.jks
 
+      # Ранняя проверка: если секрет был скопирован не полностью/повреждён,
+      # keytool сообщит об этом явно здесь, а не через невнятную ошибку Gradle позже.
+      - name: Verify keystore integrity
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+        run: |
+          echo "Keystore file size: $(stat -c%s android-signing-keystore.jks) bytes"
+          keytool -list -keystore android-signing-keystore.jks -storepass "$KEYSTORE_PASSWORD"
+
       # assembly/build.gradle читает эти три переменные напрямую через System.getenv(),
       # без Gradle -P свойств — имена и регистр должны совпадать 1-в-1.
       - name: Build release APK
