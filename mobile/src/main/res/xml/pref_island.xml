@@ -73,6 +73,20 @@
 
     </PreferenceCategory>
 
+    <PreferenceCategory android:key="@string/key_security" android:title="@string/pref_security_header">
+
+        <Preference
+            android:key="@string/key_install_ca_cert"
+            android:title="@string/pref_install_ca_cert_title"
+            android:summary="@string/pref_install_ca_cert_summary" />
+
+        <Preference
+            android:key="@string/key_manage_ca_certs"
+            android:title="@string/pref_manage_ca_certs_title"
+            android:summary="@string/pref_manage_ca_certs_summary" />
+
+    </PreferenceCategory>
+
     <PreferenceCategory android:key="@string/key_setup" android:title="@string/pref_setup_header">
 
         <Preference

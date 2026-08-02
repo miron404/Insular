@@ -201,6 +201,17 @@ the sandbox environment. Island never collect data related to your privacy, plea
     <string name="pref_lock_capture_target_summary">Switch the provider of image capture to non-system app.</string>
     <string name="pref_lock_capture_target_summary_mainland">Switch the provider of image capture to non-system app. (Requires Managed Mainland)</string>
 
+    <string name="pref_security_header">Security</string>
+    <string name="pref_install_ca_cert_title">Install CA certificate</string>
+    <string name="pref_install_ca_cert_summary">Install a custom CA certificate trusted by apps in this profile</string>
+    <string name="pref_manage_ca_certs_title">Manage CA certificates</string>
+    <string name="pref_manage_ca_certs_summary">View and remove installed CA certificates</string>
+    <string name="prompt_ca_cert_installed">CA certificate installed successfully</string>
+    <string name="prompt_ca_cert_install_failed">Failed to install CA certificate</string>
+    <string name="prompt_ca_cert_removed">CA certificate removed</string>
+    <string name="prompt_no_ca_certs_installed">No CA certificates installed</string>
+    <string name="prompt_ca_cert_already_installed">This certificate is already installed</string>
+
     <string name="pref_setup_header">Setup</string>
 
     <string name="pref_about_header">About</string>

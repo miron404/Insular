@@ -23,6 +23,10 @@
     <string translatable="false" name="key_destroy">destroy</string>
     <!-- Privacy -->
     <string translatable="false" name="key_privacy_notification_for_clone">privacy_notification_clone</string>
+    <!-- Security -->
+    <string translatable="false" name="key_security">security</string>
+    <string translatable="false" name="key_install_ca_cert">install_ca_cert</string>
+    <string translatable="false" name="key_manage_ca_certs">manage_ca_certs</string>
     <!-- About -->
     <string translatable="false" name="key_version">version</string>
     <string translatable="false" name="key_beta">beta</string>
