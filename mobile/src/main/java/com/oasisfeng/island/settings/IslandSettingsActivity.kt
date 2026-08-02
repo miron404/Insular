@@ -177,14 +177,7 @@ import java.security.cert.X509Certificate
             setOnPreferenceClickListener { true.also {
                 val intent = Intent(ACTION_OPEN_DOCUMENT).apply {
                     addCategory(Intent.CATEGORY_OPENABLE)
-                    type = "*/*"   // Accept all file types, we'll parse and validate later
-                    putExtra(Intent.EXTRA_MIME_TYPES, arrayOf(
-                        "application/x-x509-ca-cert",
-                        "application/x-pem-file",
-                        "application/x-x509-user-cert",
-                        "application/pkix-cert",
-                        "application/octet-stream"
-                    ))
+                    type = "*/*"
                 }
                 startActivityForResult(intent, REQUEST_CODE_INSTALL_CA_CERT)
             }}
