@@ -178,6 +178,14 @@ import java.security.cert.X509Certificate
                 val intent = Intent(ACTION_OPEN_DOCUMENT).apply {
                     addCategory(Intent.CATEGORY_OPENABLE)
                     type = "*/*"
+                    putExtra(Intent.EXTRA_MIME_TYPES, arrayOf(
+                        "application/x-x509-ca-cert",
+                        "application/x-x509-user-cert",
+                        "application/x-pem-file",
+                        "application/pkix-cert",
+                        "application/pkcs10",
+                        "application/octet-stream" // фолбэк для файлов без распознанного MIME
+                    ))
                 }
                 startActivityForResult(intent, REQUEST_CODE_INSTALL_CA_CERT)
             }}
