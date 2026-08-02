@@ -1,0 +1,66 @@
+name: Build debug APK
+
+on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x ./gradlew
+
+      # Повторяем шаги официального рецепта сборки F-Droid для этого приложения
+      # (metadata/com.oasisfeng.island.fdroid.yml), адаптированные под FOSS/fdroid-флейвор:
+      - name: Strip Google/Firebase config (as in official F-Droid recipe)
+        run: |
+          rm -f assembly/google-services.json
+          rm -f shared/src/main/res/xml/analytics_tracker.xml
+
+      - name: Remove core-google-shortcuts dependency block
+        run: sed -i -e '/core-google-shortcuts/,+2d' mobile/build.gradle
+
+      - name: Bump Gradle heap size
+        run: echo 'org.gradle.jvmargs=-Xmx4096m' >> gradle.properties
+
+      # Debug-сборка в Android Gradle Plugin автоматически подписывается
+      # автосгенерированным debug.keystore, никаких секретов не требуется.
+      #
+      # ВАЖНО: в проекте ДВА productFlavor-измерения (напр. complete/light и fdroid/googlePlay),
+      # поэтому таск сборки — составной. Если сборка упадёт с "task not found" —
+      # сначала выполните: ./gradlew tasks --all | grep -i assemble
+      # и подставьте точное имя вместо assembleCompleteFdroidDebug.
+      - name: Build debug APK
+        run: ./gradlew :assembly:assembleCompleteFdroidDebug --stacktrace
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-apk
+          path: assembly/build/outputs/apk/**/*.apk
+          if-no-files-found: error
