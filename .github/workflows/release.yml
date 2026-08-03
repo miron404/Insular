@@ -1,0 +1,141 @@
+name: Build release APK
+
+on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x ./gradlew
+
+      # Повторяем шаги официального рецепта сборки F-Droid для этого приложения
+      # (metadata/com.oasisfeng.island.fdroid.yml), адаптированные под FOSS/fdroid-флейвор:
+      - name: Strip Google/Firebase config (as in official F-Droid recipe)
+        run: |
+          rm -f assembly/google-services.json
+          rm -f shared/src/main/res/xml/analytics_tracker.xml
+
+      - name: Remove core-google-shortcuts dependency block
+        run: sed -i -e '/core-google-shortcuts/,+2d' mobile/build.gradle
+
+      - name: Bump Gradle heap size
+        run: echo 'org.gradle.jvmargs=-Xmx4096m' >> gradle.properties
+
+      # Debug-сборка в Android Gradle Plugin автоматически подписывается
+      # автосгенерированным debug.keystore, никаких секретов не требуется.
+      #
+      # ВАЖНО: в проекте ДВА productFlavor-измерения (напр. complete/light и fdroid/googlePlay),
+      # поэтому таск сборки — составной. Если сборка упадёт с "task not found" —
+      # сначала выполните: ./gradlew tasks --all | grep -i assemble
+      # и подставьте точное имя вместо assembleCompleteFdroidDebug.
+      - name: Build debug APK
+        run: ./gradlew :assembly:assembleCompleteFdroidDebug --stacktrace
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-apk
+          path: assembly/build/outputs/apk/**/*.apk
+          if-no-files-found: error
+
+  build-release:
+    runs-on: ubuntu-latest
+    # Собирается только вручную — чтобы не гонять release-сборку на каждый push
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x ./gradlew
+
+      - name: Strip Google/Firebase config (as in official F-Droid recipe)
+        run: |
+          rm -f assembly/google-services.json
+          rm -f shared/src/main/res/xml/analytics_tracker.xml
+
+      - name: Remove core-google-shortcuts dependency block
+        run: sed -i -e '/core-google-shortcuts/,+2d' mobile/build.gradle
+
+      - name: Bump Gradle heap size
+        run: echo 'org.gradle.jvmargs=-Xmx4096m' >> gradle.properties
+
+      # Имя файла и путь ("android-signing-keystore.jks" в корне репо) выбраны
+      # по аналогии с оригинальным GitLab CI ($KEYSTORE_FILE -> android-signing-keystore.jks).
+      - name: Decode signing keystore
+        run: echo "${{ secrets.RELEASE_KEYSTORE_B64 }}" | base64 -d > android-signing-keystore.jks
+
+      # Ранняя проверка: если секрет был скопирован не полностью/повреждён,
+      # keytool сообщит об этом явно здесь, а не через невнятную ошибку Gradle позже.
+      - name: Verify keystore integrity
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+        run: |
+          echo "Keystore file size: $(stat -c%s android-signing-keystore.jks) bytes"
+          keytool -list -keystore android-signing-keystore.jks -storepass "$KEYSTORE_PASSWORD"
+
+      # assembly/build.gradle читает эти три переменные напрямую через System.getenv(),
+      # без Gradle -P свойств — имена и регистр должны совпадать 1-в-1.
+      - name: Build release APK
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: ./gradlew :assembly:assembleCompleteFdroidRelease --stacktrace
+
+      - name: Remove keystore
+        if: always()
+        run: rm -f android-signing-keystore.jks
+
+      - name: Upload release APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-apk
+          path: assembly/build/outputs/apk/**/*.apk
+          if-no-files-found: error
