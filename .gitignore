@@ -170,4 +170,6 @@ _site/
 .jekyll-cache/
 .jekyll-metadata
 
-*.txt
+# Local working notes (kept out of the repo on purpose)
+/context.txt
+/task.txt

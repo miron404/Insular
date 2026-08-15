@@ -6,7 +6,9 @@ This is a fork of [Insular](https://gitlab.com/secure-system/Insular) (which its
 
 ## What's new in this fork
 
-- **Custom CA certificates** — install your own CA certificates into the work profile via `Settings → Scoped Settings → Security`, making them trusted by apps inside Island without affecting the main profile. Supports both PEM and DER formats.
+- **Custom CA certificates** — install your own CA certificates into the trust store of the work profile via `Settings → Scoped Settings → Security`, without affecting the main profile. Supports PEM and DER. The certificate is shown with its subject, issuer, expiry and SHA-256 fingerprint for confirmation before it is trusted.
+
+  Note that a user-added CA is only honoured by apps that opt in to it — since Android 7 an app targeting API 24+ ignores user-added certificates unless its `network_security_config.xml` declares `<certificates src="user"/>`.
 
 ## Features
 

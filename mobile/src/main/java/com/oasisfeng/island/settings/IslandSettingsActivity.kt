@@ -5,6 +5,7 @@ package com.oasisfeng.island.settings
 import android.Manifest.permission.*
 import android.annotation.SuppressLint
 import android.app.ActionBar
+import android.app.Activity.RESULT_OK
 import android.app.AlertDialog
 import android.app.Fragment
 import android.app.admin.DevicePolicyManager.ACTION_PROVISION_MANAGED_DEVICE
@@ -37,8 +38,10 @@ import android.text.Editable
 import android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
 import android.text.SpannableStringBuilder
 import android.text.TextWatcher
+import android.text.format.DateFormat
 import android.text.style.StyleSpan
 import android.util.ArraySet
+import android.util.Base64
 import android.util.Log
 import android.view.Menu
 import android.view.MenuInflater
@@ -54,6 +57,7 @@ import com.oasisfeng.android.ui.WebContent
 import com.oasisfeng.island.Config
 import com.oasisfeng.island.IslandNameManager
 import com.oasisfeng.island.TempDebug
+import com.oasisfeng.island.analytics.analytics
 import com.oasisfeng.island.appops.AppOpsCompat
 import com.oasisfeng.island.data.helper.isSystem
 import com.oasisfeng.island.mobile.BuildConfig
@@ -63,9 +67,15 @@ import com.oasisfeng.island.setup.IslandSetup
 import com.oasisfeng.island.util.*
 import com.oasisfeng.island.util.DevicePolicies.PreferredActivity
 import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.io.IOException
 import java.io.InputStream
+import java.security.MessageDigest
+import java.security.cert.CertificateEncodingException
+import java.security.cert.CertificateException
 import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
+import java.util.Date
 
 /**
  * Settings for each managed profile, also as launcher activity in managed profile.
@@ -93,8 +103,7 @@ import java.security.cert.X509Certificate
             setup<Preference>(R.string.key_watcher) { isEnabled = false }
             setup<Preference>(R.string.key_island_watcher) { remove(this) }
             setup<Preference>(R.string.key_app_watcher) { remove(this) }
-            setup<Preference>(R.string.key_setup) { remove(this) }
-            setup<Preference>(R.string.key_security) { remove(this) } }
+            setup<Preference>(R.string.key_setup) { remove(this) } }
         else setup<Preference>(R.string.key_managed_mainland_setup) { remove(this) }
 
         setup<Preference>(R.string.key_lock_capture_target) {
@@ -174,27 +183,13 @@ import java.security.cert.X509Certificate
 
         setup<Preference>(R.string.key_install_ca_cert) {
             if (! isProfileOrDeviceOwner) return@setup remove(this)
-            setOnPreferenceClickListener { true.also {
-                val intent = Intent(ACTION_OPEN_DOCUMENT).apply {
-                    addCategory(Intent.CATEGORY_OPENABLE)
-                    type = "*/*"
-                    putExtra(Intent.EXTRA_MIME_TYPES, arrayOf(
-                        "application/x-x509-ca-cert",
-                        "application/x-x509-user-cert",
-                        "application/x-pem-file",
-                        "application/pkix-cert",
-                        "application/pkcs10",
-                        "application/octet-stream" // фолбэк для файлов без распознанного MIME
-                    ))
-                }
-                startActivityForResult(intent, REQUEST_CODE_INSTALL_CA_CERT)
-            }}
-        }
+            onClick {   // No EXTRA_MIME_TYPES: certificate extensions are mapped inconsistently across providers, we validate the content instead.
+                startActivityForResult(Intent(ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"),
+                    REQUEST_CODE_INSTALL_CA_CERT) }}
 
         setup<Preference>(R.string.key_manage_ca_certs) {
             if (! isProfileOrDeviceOwner) return@setup remove(this)
-            setOnPreferenceClickListener { true.also { showManageCaCertsDialog(policies) }}
-        }
+            onClick { showManageCaCertsDialog(policies) }}
 
         setup<Preference>(R.string.key_reprovision) {
             if (Users.isParentProfile() && ! isProfileOrDeviceOwner) return@setup remove(this)
@@ -212,106 +207,118 @@ import java.security.cert.X509Certificate
     }
 
     @Deprecated("Deprecated in Java") override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        if (requestCode == REQUEST_CODE_INSTALL_CA_CERT && resultCode == android.app.Activity.RESULT_OK) {
-            data?.data?.let { uri -> installCaCertFromUri(uri) }
-        }
+        if (requestCode != REQUEST_CODE_INSTALL_CA_CERT) return super.onActivityResult(requestCode, resultCode, data)
+        if (resultCode == RESULT_OK) data?.data?.also { confirmCaCertInstall(it) }
     }
 
-    private fun installCaCertFromUri(uri: Uri) {
+    /** Loads the certificate picked by the user and asks for explicit confirmation before trusting it. */
+    private fun confirmCaCertInstall(uri: Uri) {
         val activity = activity ?: return
-        try {
-            val inputStream: InputStream = activity.contentResolver.openInputStream(uri)
-                ?: return Toast.makeText(activity, R.string.prompt_ca_cert_install_failed, Toast.LENGTH_LONG).show()
+        val cert = try { loadCaCertificate(uri) } catch (e: CertLoadException) { return toast(e.prompt) }
+        val der = try { cert.encoded } catch (e: CertificateEncodingException) {
+            return reportCaCertFailure(R.string.prompt_ca_cert_install_failed, "Error encoding CA certificate", e) }
 
-            val certBytes = inputStream.use { it.readBytes() }
-            val derBytes = decodeCertToDer(certBytes)
-            if (derBytes == null) {
-                Toast.makeText(activity, R.string.prompt_ca_cert_install_failed, Toast.LENGTH_LONG).show()
-                return
-            }
+        val policies = DevicePolicies(activity.applicationContext)
+        val installed = try { policies.invoke(DPM::hasCaCertInstalled, der) } catch (e: RuntimeException) {
+            return reportCaCertFailure(R.string.prompt_ca_cert_install_failed, "Error querying installed CA certificates", e) }
+        if (installed) return toast(R.string.prompt_ca_cert_already_installed)
 
-            val policies = DevicePolicies(activity.applicationContext)
-            // Check if already installed
-            if (policies.invoke(DPM::hasCaCertInstalled, derBytes)) {
-                Toast.makeText(activity, R.string.prompt_ca_cert_already_installed, Toast.LENGTH_SHORT).show()
-                return
-            }
-
-            val success = policies.invoke(DPM::installCaCert, derBytes)
-            if (success) {
-                Toast.makeText(activity, R.string.prompt_ca_cert_installed, Toast.LENGTH_SHORT).show()
-            } else {
-                Toast.makeText(activity, R.string.prompt_ca_cert_install_failed, Toast.LENGTH_LONG).show()
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error installing CA cert", e)
-            Toast.makeText(activity, R.string.prompt_ca_cert_install_failed, Toast.LENGTH_LONG).show()
-        }
+        Dialogs.buildAlert(activity, getString(R.string.prompt_ca_cert_install_confirm_title),
+                describe(cert, der) + "\n\n" + getString(R.string.prompt_ca_cert_install_confirm_warning))
+            .withOkButton { installCaCert(policies, der) }
+            .setNegativeButton(android.R.string.cancel, null).show()
     }
 
-    private fun decodeCertToDer(certBytes: ByteArray): ByteArray? {
-        return try {
-            // Try reading as DER first
-            val cf = CertificateFactory.getInstance("X.509")
-            val cert = cf.generateCertificate(ByteArrayInputStream(certBytes)) as X509Certificate
-            cert.encoded  // Always DER
-        } catch (e: Exception) {
-            try {
-                // If direct DER fails, try treating as PEM (strip headers)
-                val pemStr = String(certBytes)
-                val base64 = pemStr
-                    .replace("-----BEGIN CERTIFICATE-----", "")
-                    .replace("-----END CERTIFICATE-----", "")
-                    .replace("\\s".toRegex(), "")
-                val derBytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
-                val cf = CertificateFactory.getInstance("X.509")
-                val cert = cf.generateCertificate(ByteArrayInputStream(derBytes)) as X509Certificate
-                cert.encoded
-            } catch (e2: Exception) {
-                Log.e(TAG, "Failed to decode certificate", e2)
-                null
-            }
-        }
+    private fun installCaCert(policies: DevicePolicies, der: ByteArray) {
+        val installed = try { policies.invoke(DPM::installCaCert, der) } catch (e: RuntimeException) {
+            return reportCaCertFailure(R.string.prompt_ca_cert_install_failed, "Error installing CA certificate", e) }
+        toast(if (installed) R.string.prompt_ca_cert_installed else R.string.prompt_ca_cert_install_failed)
+    }
+
+    /** @throws CertLoadException if the content cannot be read, parsed as X.509, or is not a certificate authority. */
+    private fun loadCaCertificate(uri: Uri): X509Certificate {
+        val resolver = activity?.contentResolver ?: throw CertLoadException(R.string.prompt_ca_cert_install_failed)
+        val stream = (try { resolver.openInputStream(uri) }
+            catch (e: Exception) { throw CertLoadException(R.string.prompt_ca_cert_install_failed, e) })
+            ?: throw CertLoadException(R.string.prompt_ca_cert_install_failed)
+        val bytes = (try { stream.use { it.readAtMost(MAX_CERT_FILE_SIZE) }}
+            catch (e: IOException) { throw CertLoadException(R.string.prompt_ca_cert_install_failed, e) })
+            ?: throw CertLoadException(R.string.prompt_ca_cert_too_large)
+
+        val cert = parseCertificate(bytes) ?: throw CertLoadException(R.string.prompt_ca_cert_invalid)
+        // A certificate is only usable as a trust anchor with BasicConstraints CA:TRUE, which installCaCert() does not verify.
+        if (cert.basicConstraints < 0) throw CertLoadException(R.string.prompt_ca_cert_not_ca)
+        return cert
+    }
+
+    /** @return the first X.509 certificate in [bytes] (DER, PEM or bare BASE64), or null if none can be parsed. */
+    private fun parseCertificate(bytes: ByteArray): X509Certificate? {
+        val factory = CertificateFactory.getInstance("X.509")
+        try { return factory.generateCertificate(ByteArrayInputStream(bytes)) as? X509Certificate }
+        catch (e: CertificateException) { Log.d(TAG, "Not DER or PEM encoded, retrying as bare BASE64", e) }
+        return try {    // BASE64 without PEM armor, or PEM preceded by extra text (e.g. "Bag Attributes").
+            val base64 = String(bytes, Charsets.ISO_8859_1).substringAfter(PEM_HEADER).substringBefore(PEM_FOOTER)
+            factory.generateCertificate(ByteArrayInputStream(Base64.decode(base64, Base64.DEFAULT))) as? X509Certificate }
+        catch (e: Exception) { null.also { Log.w(TAG, "Failed to decode certificate", e) }}
     }
 
     private fun showManageCaCertsDialog(policies: DevicePolicies) {
         val activity = activity ?: return
-        val installedCerts = policies.invoke(DPM::getInstalledCaCerts)
-
-        if (installedCerts.isEmpty()) {
+        // Lists every user-added CA trusted in this profile, not just the ones installed by Island.
+        val installed = try { policies.invoke(DPM::getInstalledCaCerts) } catch (e: RuntimeException) {
+            return reportCaCertFailure(R.string.prompt_ca_cert_query_failed, "Error querying installed CA certificates", e) }
+        if (installed.isEmpty()) {
             Dialogs.buildAlert(activity, null, getString(R.string.prompt_no_ca_certs_installed)).show()
-            return
-        }
+            return }
 
-        val cf = CertificateFactory.getInstance("X.509")
-        val certInfos = installedCerts.mapNotNull { certBytes ->
-            try {
-                val cert = cf.generateCertificate(ByteArrayInputStream(certBytes)) as X509Certificate
-                val dn = cert.subjectDN?.name ?: "Unknown"
-                val issuedBy = cert.issuerDN?.name ?: "Unknown"
-                Pair("Subject: $dn\nIssued by: $issuedBy", certBytes)
-            } catch (e: Exception) {
-                Pair("Unknown certificate", certBytes)
-            }
-        }
-
-        val labels = certInfos.map { it.first }.toTypedArray()
-        Dialogs.buildList(activity, getString(R.string.pref_manage_ca_certs_title), labels) { _, which ->
-            val (_, certBytes) = certInfos[which]
-            Dialogs.buildAlert(activity, null,
-                getString(R.string.pref_destroy_title) + "?\n\n" + certInfos[which].first)
-                .withOkButton {
-                    try {
-                        policies.invoke(DPM::uninstallCaCert, certBytes)
-                        Toast.makeText(activity, R.string.prompt_ca_cert_removed, Toast.LENGTH_SHORT).show()
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error removing CA cert", e)
-                        Toast.makeText(activity, "Failed to remove certificate", Toast.LENGTH_LONG).show()
-                    }
-                }
+        val certs = installed.map { der -> der to parseCertificate(der) }
+        val labels: List<CharSequence> = certs.map { (_, cert) ->
+            cert?.subjectX500Principal?.name ?: getString(R.string.ca_cert_unrecognized) }
+        Dialogs.buildList(activity, getString(R.string.pref_manage_ca_certs_title), labels.toTypedArray()) { _, which ->
+            val (der, cert) = certs[which]
+            Dialogs.buildAlert(activity, getString(R.string.prompt_ca_cert_remove_confirm_title),
+                    cert?.let { describe(it, der) } ?: getString(R.string.ca_cert_unrecognized))
+                .withOkButton { uninstallCaCert(policies, der) }
                 .setNegativeButton(android.R.string.cancel, null).show()
         }.show()
     }
+
+    private fun uninstallCaCert(policies: DevicePolicies, der: ByteArray) {
+        try { policies.execute(DPM::uninstallCaCert, der) } catch (e: RuntimeException) {
+            return reportCaCertFailure(R.string.prompt_ca_cert_remove_failed, "Error removing CA certificate", e) }
+        toast(R.string.prompt_ca_cert_removed)
+    }
+
+    /** Human-readable summary shown before a certificate is trusted or removed. */
+    private fun describe(cert: X509Certificate, der: ByteArray): String {
+        val lines = mutableListOf(
+            getString(R.string.ca_cert_detail_subject, cert.subjectX500Principal.name),
+            getString(R.string.ca_cert_detail_issuer, cert.issuerX500Principal.name),
+            getString(R.string.ca_cert_detail_expiry, DateFormat.getDateFormat(activity).format(cert.notAfter)),
+            getString(R.string.ca_cert_detail_fingerprint, sha256Fingerprint(der)))
+        if (cert.notAfter.before(Date())) lines += getString(R.string.prompt_ca_cert_expired)
+        return lines.joinToString("\n")
+    }
+
+    private fun sha256Fingerprint(der: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(der)
+        .map { "%02X".format(it) }.chunked(16).joinToString("\n") { it.joinToString(":") }
+
+    /** @return the whole content, or null if it exceeds [limit] bytes. */
+    private fun InputStream.readAtMost(limit: Int): ByteArray? {
+        val content = ByteArrayOutputStream(); val chunk = ByteArray(8 * 1024)
+        while (true) {
+            val read = read(chunk)
+            if (read < 0) return content.toByteArray()
+            if (content.size() + read > limit) return null
+            content.write(chunk, 0, read) }
+    }
+
+    private fun reportCaCertFailure(@StringRes prompt: Int, message: String, e: Exception) {
+        analytics().logAndReport(TAG, message, e)
+        toast(prompt)
+    }
+
+    private fun toast(@StringRes prompt: Int) { activity?.also { Toast.makeText(it, prompt, Toast.LENGTH_LONG).show() }}
 
     private fun removeAppOpsRelated() {
         setup<Preference>(R.string.key_privacy_appops) { remove(this) }
@@ -418,6 +425,12 @@ class IslandSettingsActivity: CallerAwareActivity() {
     }
 }
 
+/** Failure to load a user-picked certificate, carrying the message to show. */
+private class CertLoadException(@StringRes val prompt: Int, cause: Throwable? = null): Exception(cause)
+
 private const val INTERACT_ACROSS_PROFILES = "android.permission.INTERACT_ACROSS_PROFILES"
 private const val REQUEST_CODE_INSTALL_CA_CERT = 42
+private const val MAX_CERT_FILE_SIZE = 512 * 1024   // Far beyond any X.509 certificate, just to bound the read.
+private const val PEM_HEADER = "-----BEGIN CERTIFICATE-----"
+private const val PEM_FOOTER = "-----END CERTIFICATE-----"
 private const val TAG = "Island.ISA"

@@ -203,14 +203,28 @@ the sandbox environment. Island never collect data related to your privacy, plea
 
     <string name="pref_security_header">Security</string>
     <string name="pref_install_ca_cert_title">Install CA certificate</string>
-    <string name="pref_install_ca_cert_summary">Install a custom CA certificate trusted by apps in this profile</string>
+    <string name="pref_install_ca_cert_summary">Add a certificate authority to the trust store of this profile. Only apps that opt in to user-added certificates will trust it.</string>
     <string name="pref_manage_ca_certs_title">Manage CA certificates</string>
-    <string name="pref_manage_ca_certs_summary">View and remove installed CA certificates</string>
-    <string name="prompt_ca_cert_installed">CA certificate installed successfully</string>
+    <string name="pref_manage_ca_certs_summary">View and remove user-added CA certificates trusted in this profile</string>
+    <string name="prompt_ca_cert_install_confirm_title">Install CA certificate?</string>
+    <string name="prompt_ca_cert_install_confirm_warning">Apps in this profile will accept anything signed by this authority, including intercepted network traffic. Only continue if you know where this certificate came from.</string>
+    <string name="prompt_ca_cert_remove_confirm_title">Remove CA certificate?</string>
+    <string name="prompt_ca_cert_installed">CA certificate installed</string>
     <string name="prompt_ca_cert_install_failed">Failed to install CA certificate</string>
+    <string name="prompt_ca_cert_invalid">The selected file is not a valid X.509 certificate</string>
+    <string name="prompt_ca_cert_not_ca">The selected certificate is not a certificate authority</string>
+    <string name="prompt_ca_cert_too_large">The selected file is too large to be a certificate</string>
+    <string name="prompt_ca_cert_expired">Warning: this certificate has expired.</string>
     <string name="prompt_ca_cert_removed">CA certificate removed</string>
-    <string name="prompt_no_ca_certs_installed">No CA certificates installed</string>
+    <string name="prompt_ca_cert_remove_failed">Failed to remove CA certificate</string>
+    <string name="prompt_ca_cert_query_failed">Failed to read the installed CA certificates</string>
+    <string name="prompt_no_ca_certs_installed">No user-added CA certificates in this profile</string>
     <string name="prompt_ca_cert_already_installed">This certificate is already installed</string>
+    <string name="ca_cert_detail_subject">Subject: %1$s</string>
+    <string name="ca_cert_detail_issuer">Issued by: %1$s</string>
+    <string name="ca_cert_detail_expiry">Expires: %1$s</string>
+    <string name="ca_cert_detail_fingerprint">SHA-256:\n%1$s</string>
+    <string name="ca_cert_unrecognized">Unrecognized certificate</string>
 
     <string name="pref_setup_header">Setup</string>
 
