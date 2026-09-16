@@ -4,5 +4,5 @@
 	branch = dev-ci
 [submodule "libs/setup-wizard"]
 	path = libs/setup-wizard
-	url = https://gitea.angry.im/PeterCxy/SetupWizardLibrary.git
+	url = https://github.com/miron404/SetupWizardLibrary.git
 	branch = main
