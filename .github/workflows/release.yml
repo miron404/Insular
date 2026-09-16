@@ -101,36 +101,16 @@ jobs:
       - name: Bump Gradle heap size
         run: echo 'org.gradle.jvmargs=-Xmx4096m' >> gradle.properties
 
-      # Имя файла и путь ("android-signing-keystore.jks" в корне репо) выбраны
-      # по аналогии с оригинальным GitLab CI ($KEYSTORE_FILE -> android-signing-keystore.jks).
-      - name: Decode signing keystore
-        run: echo "${{ secrets.RELEASE_KEYSTORE_B64 }}" | base64 -d > android-signing-keystore.jks
-
-      # Ранняя проверка: если секрет был скопирован не полностью/повреждён,
-      # keytool сообщит об этом явно здесь, а не через невнятную ошибку Gradle позже.
-      - name: Verify keystore integrity
-        env:
-          KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
-        run: |
-          echo "Keystore file size: $(stat -c%s android-signing-keystore.jks) bytes"
-          keytool -list -keystore android-signing-keystore.jks -storepass "$KEYSTORE_PASSWORD"
-
-      # assembly/build.gradle читает эти три переменные напрямую через System.getenv(),
-      # без Gradle -P свойств — имена и регистр должны совпадать 1-в-1.
-      - name: Build release APK
-        env:
-          KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+      # No signing secrets are used here on purpose: with no android-signing-keystore.jks present
+      # and no secrets.properties file, assembly/build.gradle leaves the release build type unsigned
+      # (see the signingConfigs.release.storeFile.exists() check there). The resulting APK is meant
+      # to be signed locally with the release key, outside of CI/GitHub secrets.
+      - name: Build unsigned release APK
         run: ./gradlew :assembly:assembleCompleteFdroidRelease --stacktrace
 
-      - name: Remove keystore
-        if: always()
-        run: rm -f android-signing-keystore.jks
-
-      - name: Upload release APK artifact
+      - name: Upload unsigned release APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: release-apk
+          name: release-apk-unsigned
           path: assembly/build/outputs/apk/**/*.apk
           if-no-files-found: error

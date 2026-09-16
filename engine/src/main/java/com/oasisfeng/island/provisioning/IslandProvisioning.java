@@ -5,14 +5,18 @@ import static android.app.Notification.PRIORITY_HIGH;
 import static android.app.admin.DeviceAdminReceiver.ACTION_PROFILE_PROVISIONING_COMPLETE;
 import static android.app.admin.DevicePolicyManager.FLAG_MANAGED_CAN_ACCESS_PARENT;
 import static android.app.admin.DevicePolicyManager.FLAG_PARENT_CAN_ACCESS_MANAGED;
+import static android.content.Intent.ACTION_GET_CONTENT;
 import static android.content.Intent.ACTION_INSTALL_PACKAGE;
 import static android.content.Intent.ACTION_MAIN;
+import static android.content.Intent.ACTION_OPEN_DOCUMENT;
 import static android.content.Intent.ACTION_OPEN_DOCUMENT_TREE;
+import static android.content.Intent.ACTION_PICK;
 import static android.content.Intent.ACTION_SEND;
 import static android.content.Intent.ACTION_SEND_MULTIPLE;
 import static android.content.Intent.ACTION_VIEW;
 import static android.content.Intent.CATEGORY_BROWSABLE;
 import static android.content.Intent.CATEGORY_LAUNCHER;
+import static android.content.Intent.CATEGORY_OPENABLE;
 import static android.content.Intent.FLAG_ACTIVITY_NEW_TASK;
 import static android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED;
 import static android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED;
@@ -364,6 +368,13 @@ public class IslandProvisioning extends IntentService {
 		} catch (final IntentFilter.MalformedMimeTypeException ignored) {}
 		// For Storage Access Framework
 		policies.addCrossProfileIntentFilter(new IntentFilter(ACTION_OPEN_DOCUMENT_TREE), FLAGS_BIDIRECTIONAL);
+		// For system file/content picker (single-file pick), bidirectional so personal apps can also browse into the work profile
+		try {
+			policies.addCrossProfileIntentFilter(IntentFilters.forAction(ACTION_GET_CONTENT).withCategory(CATEGORY_OPENABLE).withDataType("*/*"), FLAGS_BIDIRECTIONAL);
+			policies.addCrossProfileIntentFilter(IntentFilters.forAction(ACTION_OPEN_DOCUMENT).withCategory(CATEGORY_OPENABLE).withDataType("*/*"), FLAGS_BIDIRECTIONAL);
+			policies.addCrossProfileIntentFilter(IntentFilters.forAction(ACTION_PICK).withDataType("*/*"), FLAGS_BIDIRECTIONAL);
+		} catch (final IntentFilter.MalformedMimeTypeException ignored) {}
+		policies.addCrossProfileIntentFilter(new IntentFilter(ACTION_PICK), FLAGS_BIDIRECTIONAL);	// Data-less ACTION_PICK (e.g. contacts, without MIME type)
 		// For web browser
 		policies.addCrossProfileIntentFilter(IntentFilters.forAction(ACTION_VIEW).withCategory(CATEGORY_BROWSABLE).withDataSchemes("http", "https", "ftp"),
 				FLAG_PARENT_CAN_ACCESS_MANAGED);

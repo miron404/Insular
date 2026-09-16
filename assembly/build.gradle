@@ -50,7 +50,10 @@ android {
         release {
             minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-            signingConfig signingConfigs.release
+            // Only apply the release signing config when the keystore is actually present (local dev
+            // with secrets.properties). Without it (e.g. plain CI checkout), the release build is left
+            // unsigned, to be signed separately by whoever holds the release key.
+            if (signingConfigs.release.storeFile.exists()) signingConfig signingConfigs.release
         }
     }
 
